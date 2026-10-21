@@ -16,7 +16,7 @@ Shoe Shopping Cart built with SpringBoot, JPA, MySQL , Spring Security, Hibernat
 
 ## CI/CD Pipeline
 
-Tested on self-hosted Jenkins and GitLab CI (lab environment, not public — screenshots below).
+Tested on self-hosted Jenkins and GitLab CI (not public — screenshots below).
 
 ### GitLab CI
 ![Pipeline history](docs/screenshots/gitlab-pipelines-history.png)
