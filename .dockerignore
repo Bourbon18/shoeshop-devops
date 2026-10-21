@@ -1,0 +1,9 @@
+.git
+target
+*.sql
+*.md
+.gitlab-ci.yml
+Jenkinsfile
+.idea
+.vscode
+*.log
