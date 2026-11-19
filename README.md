@@ -9,6 +9,41 @@ A Spring Boot online shoe shop (Java 8, Maven, MySQL), used to practice DevOps t
 | **Zabbix Server** | Zabbix monitoring |
 | **Ubuntu Server** (`lab-server`) | Runs the app, MySQL, the GitLab Runner, the Jenkins agent and the Zabbix agent |
 
+```mermaid
+flowchart LR
+    DEV([Developer])
+    USER([End user])
+
+    subgraph GLS[GitLab Server]
+        GL[GitLab<br/>repo + CI]
+    end
+    subgraph JKS[Jenkins Server]
+        JK[Jenkins]
+    end
+    subgraph ZBS[Zabbix Server]
+        ZB[Zabbix server<br/>+ web UI]
+    end
+    subgraph LS[Ubuntu Server: lab-server]
+        RUN[GitLab Runner]
+        AGT[Jenkins agent]
+        APP[Shoeshop app<br/>JAR :8080]
+        DB[(MySQL :3306)]
+        ZA[Zabbix agent]
+    end
+
+    DEV -- "1. create tag" --> GL
+    DEV -- "1. Build Now" --> JK
+    GL -- "2. send jobs" --> RUN
+    JK -- "2. send jobs" --> AGT
+    RUN -- "3. build + deploy" --> APP
+    AGT -- "3. build + deploy" --> APP
+    APP --> DB
+    ZA -- "metrics" --> ZB
+    USER -- "browse" --> APP
+```
+
+**How to read it:** the developer starts a deploy either by creating a tag in GitLab or by clicking *Build Now* in Jenkins (step 1). The GitLab or Jenkins server does not build anything itself. It sends the jobs to its runner/agent on `lab-server` (step 2), which builds the JAR and restarts the app on the same machine (step 3). The Zabbix agent on `lab-server` reports the machine's health to the Zabbix server.
+
 ---
 
 ## GitLab CI
