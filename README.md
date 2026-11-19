@@ -1,206 +1,126 @@
-# Shoeshop Online
+# Shoeshop: DevOps Practice Project
 
-An online shoe store built with **Spring Boot 2.2, Hibernate, Spring Security, Thymeleaf and MySQL**. It is packaged with **Docker / Docker Compose** and deployed through **GitLab CI** and **Jenkins** pipelines.
+A practice project for **containerizing and deploying** a Spring Boot web app (an online shoe shop with Java 8, Maven and MySQL). The app code came with the project. The DevOps work in this repo is:
 
-![Home page](https://user-images.githubusercontent.com/29988949/75882730-9ad11680-5dd6-11ea-9648-252426582a96.png)
-
----
-
-## Table of contents
-
-- [Features](#features)
-- [Tech stack](#tech-stack)
-- [Project structure](#project-structure)
-- [Database](#database)
-- [Running the app](#running-the-app)
-  - [Option 1: Docker Compose (recommended)](#option-1-docker-compose-recommended)
-  - [Option 2: Run with Maven](#option-2-run-with-maven)
-- [Demo accounts](#demo-accounts)
-- [Routes](#routes)
-- [CI/CD pipelines](#cicd-pipelines)
-  - [GitLab CI](#gitlab-ci)
-  - [Jenkins](#jenkins)
-- [Screenshots](#screenshots)
-- [Known issues](#known-issues)
+- **Docker**: a multi-stage `Dockerfile`
+- **Docker Compose**: runs the app and MySQL together on one machine, with the database filled automatically
+- **GitLab CI**: build, manual deploy and log check, triggered by Git tags
+- **Jenkins**: declarative pipeline with a manual approval step before deploy
 
 ---
 
-## Features
-
-**Customers (no login needed)**
-- Browse products with pagination (8 per page) and search by name
-- Add products to a session-based cart, change quantities, remove items
-- Enter customer details (name, email, phone, address) with validation
-- Confirm and place the order, then see an order summary
-
-**Staff (login needed)**
-- `ROLE_EMPLOYEE` and `ROLE_MANAGER`: view account info, the order list (paginated) and order details
-- `ROLE_MANAGER` only: create and edit products, including image upload (stored as a BLOB in MySQL)
-
-## Tech stack
-
-| Layer | Technology |
-|---|---|
-| Language | Java 8 |
-| Framework | Spring Boot 2.2.5 (Web MVC, Security, Data JPA) |
-| ORM | Hibernate 5 (a `SessionFactory` configured by hand) |
-| View | Thymeleaf + `thymeleaf-extras-springsecurity5` |
-| Database | MySQL 5.7 (the dump was made on MariaDB 10.1) |
-| Build | Maven |
-| Container | Docker (multi-stage build), Docker Compose |
-| CI/CD | GitLab CI, Jenkins |
-
-## Project structure
+## Repository layout (DevOps files)
 
 ```
 .
-├── Dockerfile                 # Multi-stage build: maven:3.8.6-temurin-8 -> temurin:8-jre
-├── docker-compose.yml         # MySQL 5.7 + app, seeds the DB from shoe_shopdb.sql
-├── .gitlab-ci.yml             # GitLab pipeline: build -> deploy (manual) -> showlog (manual)
-├── Jenkinsfile                # Jenkins pipeline: build -> deploy (manual approval)
-├── shoe_shopdb.sql            # Schema + sample data (accounts, 11 products, 1 order)
-├── pom.xml
-├── docs/screenshots/          # CI/CD screenshots used in this README
-└── src/main
-    ├── java/com/example/demo
-    │   ├── SpringShoppingCart2Application.java  # Entry point, DataSource/SessionFactory/TxManager beans
-    │   ├── config/        # WebSecurityConfig (roles, login form), WebConfiguration (messages)
-    │   ├── controller/    # MainController (shop + cart), AdminController (login, orders, products)
-    │   ├── dao/           # AccountDAO, ProductDAO, OrderDAO (Hibernate queries)
-    │   ├── entity/        # Account, Product, Order, OrderDetail
-    │   ├── form/          # CustomerForm, ProductForm
-    │   ├── model/         # CartInfo, CartLineInfo, CustomerInfo, OrderInfo, ...
-    │   ├── pagination/    # PaginationResult
-    │   ├── service/       # UserDetailsServiceImpl (loads users for Spring Security)
-    │   ├── utils/         # Helpers for keeping the cart in the HTTP session
-    │   └── validator/     # CustomerFormValidator, ProductFormValidator
-    └── resources
-        ├── application.properties   # DB connection + Hibernate settings
-        ├── validation.properties    # Validation messages
-        ├── static/                  # CSS and images
-        └── templates/               # Thymeleaf pages
+├── Dockerfile           # Multi-stage build: Maven (JDK 8) -> JRE 8 runtime
+├── .dockerignore        # Keeps target/, .git, SQL, CI files out of the build context
+├── docker-compose.yml   # mysql:5.7 + app, health check, persistent volume
+├── shoe_shopdb.sql      # Loaded into MySQL when the container first starts
+├── .gitlab-ci.yml       # GitLab pipeline: build -> deploy (manual) -> showlog (manual)
+├── Jenkinsfile          # Jenkins pipeline: build -> deploy (manual approval)
+└── docs/screenshots/    # Screenshots of pipeline runs
 ```
 
-## Database
+---
 
-`shoe_shopdb.sql` creates 4 tables:
+## 1. Docker
 
-| Table | Purpose |
-|---|---|
-| `Accounts` | Staff accounts (BCrypt password, role, active flag) |
-| `Products` | Code (PK), name, price, image (`LONGBLOB`), created date |
-| `Orders` | Order header: customer info, amount, order number (unique) |
-| `Order_details` | Order lines, with foreign keys to `Orders` and `Products` |
+[`Dockerfile`](Dockerfile) builds the image in two stages:
 
-## Running the app
+| Stage | Base image | What it does |
+|---|---|---|
+| `build` | `maven:3.8.6-eclipse-temurin-8` | Copies `pom.xml` and runs `mvn dependency:go-offline` first, so the dependency layer stays cached until the POM changes. Then copies `src/` and runs `mvn package -DskipTests` |
+| runtime | `eclipse-temurin:8-jre` | Copies only the built JAR as `app.jar`, exposes port `8080` and runs `java -jar app.jar` |
 
-### Option 1: Docker Compose (recommended)
-
-Requirements: Docker and Docker Compose.
+The final image has only the JRE and the JAR. Maven and the source code stay in the build stage.
 
 ```bash
-docker compose up -d --build
+docker build -t shoeshop:latest .
 ```
 
-- App: <http://localhost:88>
-- MySQL: `localhost:3307` (user `shoeshop` / `1234`, database `shoeshop`)
+## 2. Docker Compose
 
-On first start, MySQL runs `shoe_shopdb.sql` from `docker-entrypoint-initdb.d`. The app waits for the DB health check before it starts. Compose overrides the DB settings through the `SPRING_DATASOURCE_*` environment variables.
+[`docker-compose.yml`](docker-compose.yml) runs the whole stack:
 
-To stop it and remove the data volume:
+| Service | Image | Host port | Notes |
+|---|---|---|---|
+| `db` | `mysql:5.7` | `3307 -> 3306` | Runs `shoe_shopdb.sql` from `/docker-entrypoint-initdb.d` on first start. Data is kept in the `db-data` volume. Has a `mysqladmin ping` health check |
+| `app` | built from `Dockerfile` | `88 -> 8080` | `depends_on: condition: service_healthy`, so the app waits until MySQL is ready. The DB connection is set with `SPRING_DATASOURCE_*` environment variables, which override `application.properties` |
 
 ```bash
-docker compose down -v
+docker compose up -d --build     # start
+docker compose logs -f app       # follow the app logs
+docker compose down -v           # stop and delete the DB volume
 ```
 
-### Option 2: Run with Maven
+Then open <http://localhost:88>. You can log in at `/admin/login` as `manager1` with password `123`.
 
-Requirements: JDK 8, Maven 3.6+, and a MySQL server.
+---
 
-1. Create the database and import the data:
-   ```bash
-   mysql -u root -p -e "CREATE DATABASE shoeshop; CREATE USER 'shoeshop'@'%' IDENTIFIED BY '1234'; GRANT ALL ON shoeshop.* TO 'shoeshop'@'%';"
-   mysql -u root -p shoeshop < shoe_shopdb.sql
-   ```
-2. Point the app at your DB. Either edit `src/main/resources/application.properties` (it currently points to the lab server `192.168.139.100`), or override it at runtime:
-   ```bash
-   mvn clean package -DskipTests
-   java -jar target/shoe-ShoppingCart-0.0.1-SNAPSHOT.jar \
-     --spring.datasource.url=jdbc:mysql://localhost:3306/shoeshop?useSSL=false
-   ```
-3. Open <http://localhost:8080>.
+## 3. CI/CD on a self-hosted lab server
 
-## Demo accounts
+Both pipelines run on a self-hosted Linux server. It has the label `lab-server` both as a GitLab Runner and as a Jenkins agent. The servers are not public, so screenshots are included.
 
-Log in at `/admin/login`:
+### How a deploy works
 
-| Username | Password | Role |
-|---|---|---|
-| `employee1` | `123` | `ROLE_EMPLOYEE` |
-| `manager1` | `123` | `ROLE_MANAGER` |
+Both pipelines deploy the app the same way: as a plain process on the server, not in a container.
 
-## Routes
+```mermaid
+flowchart LR
+    A[Push tag / start job] --> B[mvn install -DskipTests]
+    B --> C{Manual approval}
+    C -- no --> X[Stop]
+    C -- yes --> D[Copy JAR to /datas/shoeshop]
+    D --> E[chown to user shoeshop]
+    E --> F[Kill old Java process]
+    F --> G[Start new JAR in background<br/>log in nohup.out]
+```
 
-| URL | Access | Description |
-|---|---|---|
-| `/` | Public | Home page |
-| `/productList?name=&page=` | Public | Product list with search |
-| `/buyProduct?code=` | Public | Add a product to the cart |
-| `/shoppingCart` | Public | View or update the cart |
-| `/shoppingCartCustomer` | Public | Enter customer details |
-| `/shoppingCartConfirmation` | Public | Review and place the order |
-| `/shoppingCartFinalize` | Public | Order placed |
-| `/productImage?code=` | Public | Product image from the DB |
-| `/admin/login`, `/admin/logout` | Public | Staff login and logout |
-| `/admin/accountInfo` | Employee, Manager | Logged-in account info |
-| `/admin/orderList`, `/admin/order?orderId=` | Employee, Manager | Orders and order details |
-| `/admin/product?code=` | Manager | Create or edit a product |
-
-## CI/CD pipelines
-
-Both pipelines were tested on a self-hosted lab (a runner/agent labelled `lab-server`). They are not public, so screenshots are included below. Both deploy the same way: build the JAR, copy it to `/datas/shoeshop/`, give ownership to the `shoeshop` user, kill the old process, and start the new JAR in the background with its log in `nohup.out`.
+The app runs under its own Linux user, `shoeshop`. The CI user uses `sudo` to copy the JAR, set ownership and start the process as `shoeshop`.
 
 ### GitLab CI
 
-File: [`.gitlab-ci.yml`](.gitlab-ci.yml). It runs only when a **tag** is pushed.
+File: [`.gitlab-ci.yml`](.gitlab-ci.yml). Every job uses `only: tags`, so the pipeline runs only when a tag is pushed:
 
-| Stage | Trigger | What it does |
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+| Stage | When | What it does |
 |---|---|---|
-| `build` | Automatic | `mvn install -DskipTests=True` |
-| `deploy` | Manual | Copies the JAR, restarts the app. Only the user `tester01` is allowed; anyone else gets `Permission denied` |
-| `showlog` | Manual | Waits 20 seconds, then prints the end of `nohup.out` |
+| `build` | Automatic | `GIT_STRATEGY: clone`, then `mvn install -DskipTests=True` |
+| `deploy` | Manual | `GIT_STRATEGY: none`, so it reuses the JAR built in the same directory. Only the GitLab user `tester01` may deploy; anyone else gets `Permission denied` and the job fails |
+| `showlog` | Manual | Waits 20 seconds, then prints the end of `nohup.out` to check that the app started |
 
-![Pipeline history](docs/screenshots/gitlab-pipelines-history.png)
-![Jobs history](docs/screenshots/gitlab-jobs-history.png)
-![Pipeline detail](docs/screenshots/gitlab-pipeline-detail.png)
+Pipeline variables: `projectname`, `version`, `projectuser=shoeshop`, `projectpath=/datas/shoeshop/`.
+
+![GitLab pipelines history](docs/screenshots/gitlab-pipelines-history.png)
+![GitLab jobs history](docs/screenshots/gitlab-jobs-history.png)
+![GitLab pipeline detail](docs/screenshots/gitlab-pipeline-detail.png)
 
 ### Jenkins
 
-File: [`Jenkinsfile`](Jenkinsfile). It runs on an agent labelled `lab-server`.
+File: [`Jenkinsfile`](Jenkinsfile). It is a declarative pipeline that runs on agent `lab-server`. All the shell commands are defined once in the `environment` block.
 
 | Stage | What it does |
 |---|---|
-| `build` | `mvn clean install -DskipTests=true` with a shared local Maven repository |
-| `deploy` | Waits up to 5 minutes for someone to answer *"Can it be deployed?"* (yes/no). On **yes**: copy the JAR, set ownership, kill the old process only if a PID is found, start the new JAR |
+| `build` | `mvn clean install -DskipTests=true`, using a shared Maven cache at `/datadrive/jenkins_workspace/.m2/repository` |
+| `deploy` | An `input` step asks *"Can it be deployed?"* (yes/no) and waits up to **5 minutes**. On **yes** it copies the JAR, runs `chown`, kills the old process and starts the new JAR |
 
-![Deploy log](docs/screenshots/jenkins-deploy-log.png)
-![Build history](docs/screenshots/jenkins-build-history.png)
+Changes made to the original pipeline:
+- The kill step now kills only when a PID is found (`if [ -n "$PID" ]`). Before, the stage failed on the first deploy, when no process was running yet.
+- The run command uses double quotes outside and single quotes inside. This lets Groovy fill in `${appUser}` and `${folderDeploy}` while the shell still gets a valid command.
 
-## Screenshots
+![Jenkins deploy log](docs/screenshots/jenkins-deploy-log.png)
+![Jenkins build history](docs/screenshots/jenkins-build-history.png)
 
-**Product list**
+---
 
-![ProductList Page](https://user-images.githubusercontent.com/29988949/75947593-c6dfac80-5e55-11ea-8582-bce667beb9bb.png)
+## Known limitations and next steps
 
-**Cart**
-
-![Cart Page](https://user-images.githubusercontent.com/29988949/75968115-bf35fd00-5e81-11ea-9bae-e78ff047dcfd.png)
-
-![Cart Page](https://user-images.githubusercontent.com/29988949/75956013-da960d80-5e6b-11ea-84b2-a0ca854ef9c9.png)
-
-## Known issues
-
-- **Table name case.** The `OrderDetail` entity maps to `Order_Details`, but the SQL dump creates `Order_details`. MySQL on Linux treats table names as case-sensitive by default, so order details may fail to load or save there. Fix it by renaming one of them, or by setting `lower_case_table_names=1` on the MySQL server.
-- **Credentials in the repo.** The DB password (`1234`) is in `application.properties` and `docker-compose.yml`. That is fine for a lab, but use environment variables or secrets in a real deployment.
-- **CSRF protection is turned off** in `WebSecurityConfig`.
-- **No real tests.** There is only the default `contextLoads` test, and it needs a working DB connection. That is why the pipelines build with `-DskipTests`.
+- **Credentials are in plain text.** The DB password is in `application.properties` and `docker-compose.yml`. Next step: move it to a `.env` file, GitLab CI/CD variables or Jenkins credentials.
+- **Tests are skipped** (`-DskipTests`). The only test needs a live database. Next step: add a test stage that runs with a MySQL service container.
+- **Deploys use a bare JAR with `nohup`.** Nothing restarts the app if it crashes, and there is no rollback. Next step: run it as a `systemd` service, or deploy the Docker image from a registry.
+- **No image registry.** The Docker image is only built locally. Next step: push it to the GitLab Container Registry or Docker Hub from CI.
+- **Table name case.** The entity maps to `Order_Details`, but the SQL dump creates `Order_details`. MySQL on Linux (including the `mysql:5.7` container) treats table names as case-sensitive, so order details may fail. Fix it by renaming one of them, or by setting `lower_case_table_names=1` on MySQL.
