@@ -6,6 +6,32 @@ A practice project for **containerizing and deploying** a Spring Boot web app (a
 - **Docker Compose**: runs the app and MySQL together on one machine, with the database filled automatically
 - **GitLab CI**: build, manual deploy and log check, triggered by Git tags
 - **Jenkins**: declarative pipeline with a manual approval step before deploy
+- **Zabbix**: monitors the server that runs the app
+
+---
+
+## Lab infrastructure
+
+Everything runs on self-hosted virtual machines:
+
+| VM | Role |
+|---|---|
+| **GitLab Server** | Hosts the Git repository and runs GitLab CI |
+| **Jenkins Server** | Jenkins controller |
+| **Zabbix Server** | Zabbix server and web UI (`zabbix.devops.fresher`) |
+| **Ubuntu Server** (`lab-server`, `192.168.139.100`) | Runs the app, MySQL, the GitLab Runner and the Jenkins agent (both labelled `lab-server`), and the Zabbix agent |
+
+```mermaid
+flowchart LR
+    GL[GitLab Server] -- runs jobs on --> LS
+    JK[Jenkins Server] -- runs jobs on --> LS
+    subgraph LS[Ubuntu Server: lab-server 192.168.139.100]
+        R[GitLab Runner + Jenkins agent] --> APP[Shoeshop JAR :8080]
+        APP --> DB[(MySQL :3306)]
+        AG[Zabbix agent]
+    end
+    AG -- metrics --> ZB[Zabbix Server]
+```
 
 ---
 
@@ -117,10 +143,30 @@ Changes made to the original pipeline:
 
 ---
 
+## 4. Monitoring with Zabbix
+
+A self-hosted **Zabbix** server monitors the lab server that runs the app. The data comes from a Zabbix agent installed on the lab server.
+
+| Item | Value |
+|---|---|
+| Monitored hosts | 2: the Zabbix server itself and `lab-server` (`192.168.139.100`) |
+| Template | Linux by Zabbix agent (CPU, memory, disk, network, uptime, security checks) |
+| Items / triggers | 210 items (202 enabled), 105 triggers |
+
+![Zabbix dashboard](docs/screenshots/zabbix-dashboard.png)
+
+Both alerts in the screenshot are expected:
+
+- **`/etc/passwd has been changed`** (Information): the Linux user `shoeshop`, which runs the app, was created on the server. Zabbix's security check noticed that the user list changed.
+- **`lab-server has been restarted (uptime < 10m)`** (Warning): the server was rebooted shortly before the screenshot was taken.
+
+---
+
 ## Known limitations and next steps
 
 - **Credentials are in plain text.** The DB password is in `application.properties` and `docker-compose.yml`. Next step: move it to a `.env` file, GitLab CI/CD variables or Jenkins credentials.
 - **Tests are skipped** (`-DskipTests`). The only test needs a live database. Next step: add a test stage that runs with a MySQL service container.
 - **Deploys use a bare JAR with `nohup`.** Nothing restarts the app if it crashes, and there is no rollback. Next step: run it as a `systemd` service, or deploy the Docker image from a registry.
+- **Monitoring stops at the OS level.** Zabbix tracks the server, not the app. Next step: add a web scenario on port `8080` and a check that the Java process is running, so a failed deploy raises an alert.
 - **No image registry.** The Docker image is only built locally. Next step: push it to the GitLab Container Registry or Docker Hub from CI.
 - **Table name case.** The entity maps to `Order_Details`, but the SQL dump creates `Order_details`. MySQL on Linux (including the `mysql:5.7` container) treats table names as case-sensitive, so order details may fail. Fix it by renaming one of them, or by setting `lower_case_table_names=1` on MySQL.
