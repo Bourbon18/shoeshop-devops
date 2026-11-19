@@ -11,7 +11,8 @@ A Spring Boot online shoe shop (Java 8, Maven, MySQL), used to practice DevOps t
 
 ```mermaid
 flowchart LR
-    GL[GitLab Server] -- runs jobs on --> LS
+    GL[GitLab Server] -- webhook --> JK
+    GL -- runs jobs on --> LS
     JK[Jenkins Server] -- runs jobs on --> LS
     subgraph LS[Ubuntu Server: lab-server]
         R[GitLab Runner + Jenkins agent] --> APP[Shoeshop JAR :8080]
@@ -49,7 +50,7 @@ File: [`Jenkinsfile`](Jenkinsfile)
 
 **How it works**
 
-1. **Trigger.** A Jenkins job reads the `Jenkinsfile` from the repo. A build is started from the Jenkins UI with *Build Now*.
+1. **Trigger (GitLab webhook).** Jenkins is connected to GitLab. The repo on GitLab has a **webhook** that points to the Jenkins job. When code is pushed to GitLab, GitLab calls the webhook and Jenkins starts a build automatically. Jenkins then pulls the code and reads the `Jenkinsfile` from the repo.
 2. **Agent.** `agent { label 'lab-server' }` tells the Jenkins Server to run the pipeline on the agent node `lab-server`, not on the Jenkins machine itself.
 3. **Variables.** The `environment` block defines the app name, deploy folder and every shell command once. The stages only call these variables.
 4. **Stages:**
