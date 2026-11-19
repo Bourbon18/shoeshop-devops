@@ -17,10 +17,7 @@ File: [`.gitlab-ci.yml`](.gitlab-ci.yml)
 
 **How it works**
 
-1. **Trigger.** Every job has `only: tags`, so a normal push does nothing. A pipeline starts only when a tag is pushed:
-   ```bash
-   git tag v1.0.0 && git push origin v1.0.0
-   ```
+1. **Trigger.** Every job has `only: tags`, so a normal commit does not start a pipeline. To release, create a new tag in the GitLab web UI (**Code → Tags → New tag**). GitLab then starts the pipeline for that tag automatically.
 2. **Runner.** GitLab Server does not run the jobs itself. It sends them to the GitLab Runner registered on `lab-server` (every job has `tags: lab-server`). The runner runs the scripts as shell commands on that machine.
 3. **Stages.** The stages run in order, and each one must pass before the next can start:
 
