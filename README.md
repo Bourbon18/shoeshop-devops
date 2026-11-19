@@ -18,14 +18,14 @@ Everything runs on self-hosted virtual machines:
 |---|---|
 | **GitLab Server** | Hosts the Git repository and runs GitLab CI |
 | **Jenkins Server** | Jenkins controller |
-| **Zabbix Server** | Zabbix server and web UI (`zabbix.devops.fresher`) |
-| **Ubuntu Server** (`lab-server`, `192.168.139.100`) | Runs the app, MySQL, the GitLab Runner and the Jenkins agent (both labelled `lab-server`), and the Zabbix agent |
+| **Zabbix Server** | Zabbix server and web UI |
+| **Ubuntu Server** (`lab-server`) | Runs the app, MySQL, the GitLab Runner and the Jenkins agent (both labelled `lab-server`), and the Zabbix agent |
 
 ```mermaid
 flowchart LR
     GL[GitLab Server] -- runs jobs on --> LS
     JK[Jenkins Server] -- runs jobs on --> LS
-    subgraph LS[Ubuntu Server: lab-server 192.168.139.100]
+    subgraph LS[Ubuntu Server: lab-server]
         R[GitLab Runner + Jenkins agent] --> APP[Shoeshop JAR :8080]
         APP --> DB[(MySQL :3306)]
         AG[Zabbix agent]
@@ -149,7 +149,7 @@ A self-hosted **Zabbix** server monitors the lab server that runs the app. The d
 
 | Item | Value |
 |---|---|
-| Monitored hosts | 2: the Zabbix server itself and `lab-server` (`192.168.139.100`) |
+| Monitored hosts | 2: the Zabbix server itself and `lab-server` |
 | Template | Linux by Zabbix agent (CPU, memory, disk, network, uptime, security checks) |
 | Items / triggers | 210 items (202 enabled), 105 triggers |
 
